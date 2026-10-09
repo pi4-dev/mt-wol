@@ -9,10 +9,36 @@ network or put your own reverse proxy / auth in front of it.
 
 ## Setup
 1. `cp .env.example .env` and fill in the router address and credentials.
-2. On the MikroTik, enable the API service (`/ip service`: api on 8728 or api-ssl on 8729) and create
-   a user with `api,read,test` policies (`/tool wol` needs `test`, reading DHCP needs `read`):
-   `/user group add name=wol policy=api,read,test` and `/user add name=wol group=wol password=...`
+2. Create a least-privilege API user on the MikroTik (see below).
 3. Run `docker compose up -d --build` and open `http://<docker-host>:8000` (port set by `APP_PORT`).
+
+## Least-privilege MikroTik user
+The app needs only three RouterOS policies:
+
+| Policy | Why |
+|--------|-----|
+| `api`  | log in over the API |
+| `read` | list DHCP servers and leases (`/ip/dhcp-server`, `/ip/dhcp-server/lease`) |
+| `test` | run `/tool/wol` |
+
+Do **not** grant `write`, `policy`, `sensitive`, `ftp`, `ssh`, `telnet`, `winbox`, `web`, `password`, `reboot`, etc.
+Run in the RouterOS terminal (replace the password and the address with your Docker host's IP or subnet):
+
+```routeros
+/user group add name=wol-api policy=api,read,test comment="mt-wol: minimal"
+/user add name=wol group=wol-api password="<long-random-password>" address=192.168.88.10/32 comment="mt-wol"
+```
+
+`address=` makes RouterOS accept this user only from the Docker host. Optionally also restrict the API service itself
+(use `api-ssl` + `MT_SSL=true` if the traffic crosses an untrusted segment):
+
+```routeros
+/ip service set api address=192.168.88.10/32
+/ip service disable telnet,ftp,www
+```
+
+Verify: `/user group print where name=wol-api` should list only `api,read,test`.
+If the import or Wake fails with "not enough permissions", check that policy list first.
 
 ## How it works
 - **LAN** of a host = the interface of its DHCP server on the router (e.g. `bridge-lan`, `vlan20`).
