@@ -12,6 +12,17 @@ network or put your own reverse proxy / auth in front of it.
 2. Create a least-privilege API user on the MikroTik (see below).
 3. Run `docker compose up -d --build` and open `http://<docker-host>:8000` (port set by `APP_PORT`).
 
+## Local overrides
+Keep machine-specific settings (e.g. a different port) in `docker-compose.override.yaml` next to
+`docker-compose.yaml`; Docker Compose merges it automatically and git ignores it (`compose.override.yaml` too).
+
+```yaml
+services:
+  mt-wol:
+    ports:
+      - "8080:8000"
+```
+
 ## Least-privilege MikroTik user
 The app needs only three RouterOS policies:
 
