@@ -1,52 +1,9 @@
 services:
-  traefik:
-    image: traefik:v3.1
-    restart: unless-stopped
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.websecure.http.tls.certresolver=le
-      - --certificatesresolvers.le.acme.email=${ACME_EMAIL:-admin@example.com}
-      - --certificatesresolvers.le.acme.tlschallenge=true
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-    ports: ["80:80", "443:443"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - letsencrypt:/letsencrypt
-
-  authelia:
-    image: authelia/authelia:4.38
-    restart: unless-stopped
-    volumes:
-      - ./authelia:/config
-    environment:
-      TZ: UTC
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.authelia.rule=Host(`${AUTH_DOMAIN}`)
-      - traefik.http.routers.authelia.tls=true
-      - traefik.http.services.authelia.loadbalancer.server.port=9091
-      # forward-auth middleware, referenced by the other services
-      - traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/authz/forward-auth
-      - traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true
-      - traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Email,Remote-Name
-
   mt-wol:
     build: .
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
     volumes:
       - ./data:/data
-    # no published ports: reachable only through Traefik + Authelia
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.mt-wol.rule=Host(`${APP_DOMAIN}`)
-      - traefik.http.routers.mt-wol.tls=true
-      - traefik.http.routers.mt-wol.middlewares=authelia@docker
-      - traefik.http.services.mt-wol.loadbalancer.server.port=8000
-
-volumes:
-  letsencrypt:
