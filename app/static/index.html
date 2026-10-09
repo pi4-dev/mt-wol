@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MT WoL</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1f24; --mut:#6b7280; --line:#e5e7eb; --acc:#2563eb; --err:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --fg:#e6e8eb; --mut:#9aa3af; --line:#2a2f37; --acc:#60a5fa; --err:#f87171; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  h1 .sp { flex:1; }
+  button, input, select { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
+  button { cursor:pointer; } button.p { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button.d { color:var(--err); }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--mut); font-weight:500; font-size:13px; } .mut { color:var(--mut); font-size:13px; } code { font-size:13px; }
+  .row-actions { display:flex; gap:6px; justify-content:flex-end; }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); padding:8px 14px; border-radius:6px; background:var(--fg); color:var(--bg); display:none; max-width:90vw; }
+  dialog { border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg); max-width:min(760px,95vw); width:100%; }
+  dialog::backdrop { background:#0006; }
+  form.f { display:grid; gap:10px; } form.f label { display:grid; gap:4px; font-size:13px; color:var(--mut); }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  @media (max-width:640px){ .hide-s{display:none} }
+</style>
+</head>
+<body>
+<main>
+  <h1>Wake-on-LAN <span class="sp"></span>
+    <input id="q" placeholder="Search…" type="search">
+    <button id="bImport">Import from DHCP</button>
+    <button id="bAdd" class="p">+ Host</button>
+  </h1>
+  <table>
+    <thead><tr><th>Name</th><th class="hide-s">MAC</th><th>IP</th><th>LAN</th><th class="hide-s">Last WoL</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p id="empty" class="mut" hidden>No hosts yet. Add one manually or import DHCP leases from the MikroTik.</p>
+</main>
+
+<dialog id="dHost">
+  <form class="f" method="dialog" id="fHost">
+    <h3 id="dTitle" style="margin:0">Host</h3>
+    <label>Name<input name="name" required></label>
+    <label>MAC<input name="mac" required placeholder="AA:BB:CC:DD:EE:FF"></label>
+    <label>IP<input name="ip"></label>
+    <label>LAN (MikroTik interface used for WoL)<select name="lan" id="lanSel"></select></label>
+    <label>Comment<input name="comment"></label>
+    <div class="bar"><span style="flex:1"></span><button value="cancel" formnovalidate>Cancel</button><button class="p" value="ok">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="dImport">
+  <h3 style="margin:0 0 8px">Import DHCP leases from MikroTik</h3>
+  <div class="bar">
+    <label><input type="checkbox" id="dyn"> include dynamic leases</label>
+    <span style="flex:1"></span>
+    <button id="selAll">Select new</button>
+  </div>
+  <div style="max-height:55vh;overflow:auto">
+  <table><thead><tr><th></th><th>Name</th><th>MAC</th><th>IP</th><th>LAN</th></tr></thead><tbody id="cand"></tbody></table>
+  </div>
+  <div class="bar" style="margin-top:10px"><span id="impMsg" class="mut"></span><span style="flex:1"></span>
+    <button id="impClose">Close</button><button class="p" id="impGo">Import selected</button></div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let hosts = [], lans = [], cands = [], editId = null;
+
+function toast(msg, err) {
+  const t = $('#toast'); t.textContent = msg; t.style.background = err ? 'var(--err)' : '';
+  t.style.display = 'block'; clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', 3500);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: {'Content-Type':'application/json'}, ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (!r.ok) { let m = r.statusText; try { const j = await r.json(); m = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch {} throw new Error(m); }
+  return r.status === 204 ? null : r.json();
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render() {
+  const q = $('#q').value.toLowerCase();
+  const list = hosts.filter(h => !q || [h.name,h.mac,h.ip,h.lan,h.comment].join(' ').toLowerCase().includes(q));
+  $('#empty').hidden = hosts.length > 0;
+  $('#rows').innerHTML = list.map(h => `<tr>
+    <td>${esc(h.name)}<div class="mut">${esc(h.comment)}</div></td>
+    <td class="hide-s"><code>${esc(h.mac)}</code></td><td>${esc(h.ip)}</td><td>${esc(h.lan)}</td>
+    <td class="hide-s mut">${h.last_wol ? new Date(h.last_wol).toLocaleString() : '—'}</td>
+    <td><div class="row-actions">
+      <button class="p" data-wake="${h.id}">Wake</button>
+      <button data-edit="${h.id}">Edit</button>
+      <button class="d" data-del="${h.id}">Delete</button></div></td></tr>`).join('');
+}
+async function load() { hosts = await api('/api/hosts'); render(); }
+async function loadLans() {
+  try { lans = await api('/api/lans'); } catch (e) { lans = []; toast('MikroTik: ' + e.message, true); }
+}
+function lanOptions(cur) {
+  const names = [...new Set([...lans.map(l => l.interface), cur].filter(Boolean))];
+  $('#lanSel').innerHTML = '<option value="">—</option>' + names.map(n => `<option ${n===cur?'selected':''}>${esc(n)}</option>`).join('');
+}
+async function openHost(h) {
+  editId = h?.id ?? null; $('#dTitle').textContent = h ? 'Edit host' : 'New host';
+  if (!lans.length) await loadLans();
+  const f = $('#fHost'); for (const k of ['name','mac','ip','comment']) f[k].value = h?.[k] ?? '';
+  lanOptions(h?.lan ?? ''); $('#dHost').showModal();
+}
+$('#bAdd').onclick = () => openHost(null);
+$('#q').oninput = render;
+$('#fHost').onsubmit = async e => {
+  if (e.submitter?.value !== 'ok') return;
+  const f = e.target, body = Object.fromEntries(['name','mac','ip','lan','comment'].map(k => [k, f[k].value]));
+  try { await api(editId ? `/api/hosts/${editId}` : '/api/hosts', { method: editId ? 'PUT' : 'POST', body }); await load(); }
+  catch (err) { toast(err.message, true); }
+};
+$('#rows').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.edit) openHost(hosts.find(h => h.id == b.dataset.edit));
+  if (b.dataset.del && confirm('Delete this host?')) { await api('/api/hosts/' + b.dataset.del, { method: 'DELETE' }); load(); }
+  if (b.dataset.wake) {
+    b.disabled = true;
+    try { await api(`/api/hosts/${b.dataset.wake}/wake`, { method: 'POST' }); toast('Magic packet sent'); await load(); }
+    catch (err) { toast(err.message, true); } finally { b.disabled = false; }
+  }
+};
+
+async function loadCands() {
+  $('#impMsg').textContent = 'Fetching from MikroTik…'; $('#cand').innerHTML = '';
+  try { cands = await api('/api/import/candidates?include_dynamic=' + $('#dyn').checked); $('#impMsg').textContent = cands.length + ' entries'; }
+  catch (e) { cands = []; $('#impMsg').textContent = e.message; }
+  $('#cand').innerHTML = cands.map((c, i) => `<tr><td><input type="checkbox" data-i="${i}" ${c.exists ? 'disabled' : 'checked'}></td>
+    <td>${esc(c.name)}${c.exists ? ' <span class="mut">(already added)</span>' : ''}${c.dynamic ? ' <span class="mut">(dyn.)</span>' : ''}</td>
+    <td><code>${esc(c.mac)}</code></td><td>${esc(c.ip)}</td><td>${esc(c.lan)}</td></tr>`).join('');
+}
+$('#bImport').onclick = () => { $('#dImport').showModal(); loadCands(); };
+$('#dyn').onchange = loadCands;
+$('#impClose').onclick = () => $('#dImport').close();
+$('#selAll').onclick = () => document.querySelectorAll('#cand input:not(:disabled)').forEach(i => i.checked = true);
+$('#impGo').onclick = async () => {
+  const sel = [...document.querySelectorAll('#cand input:checked')].map(i => cands[i.dataset.i]);
+  if (!sel.length) return;
+  try { const r = await api('/api/import', { method: 'POST', body: { hosts: sel } }); toast(`Added ${r.added}, skipped ${r.skipped}`); $('#dImport').close(); load(); }
+  catch (e) { toast(e.message, true); }
+};
+load();
+</script>
+</body>
+</html>
