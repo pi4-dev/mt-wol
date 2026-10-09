@@ -8,9 +8,9 @@ Anyone who can reach the port can wake hosts and read the inventory, so run it o
 network or put your own reverse proxy / auth in front of it.
 
 ## Setup
-1. `cp .env.example .env` and fill in the router address and credentials.
+1. `cp mt-wol.env.example mt-wol.env` and fill in the router address and credentials.
 2. Create a least-privilege API user on the MikroTik (see below).
-3. Run `docker compose up -d --build` and open `http://<docker-host>:8000` (port set by `APP_PORT`).
+3. Run `docker compose up -d --build` and open `http://<docker-host>:8000` (change the port in `docker-compose.override.yaml`).
 
 ## Local overrides
 Keep machine-specific settings (e.g. a different port) in `docker-compose.override.yaml` next to
@@ -60,7 +60,7 @@ If the import or Wake fails with "not enough permissions", check that policy lis
 
 ## Environment variables
 `MT_HOST`, `MT_PORT`, `MT_USER`, `MT_PASSWORD`, `MT_SSL` (api-ssl), `MT_SSL_ADH` (api-ssl without a router certificate),
-`MT_TIMEOUT`, `DB_PATH`; `APP_PORT` (compose only: published host port).
+`MT_TIMEOUT`, `DB_PATH`.
 
 ## Tests
 `pip install -r requirements-dev.txt && pytest`

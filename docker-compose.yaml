@@ -2,8 +2,8 @@ services:
   mt-wol:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file: mt-wol.env
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "8000:8000"
     volumes:
       - ./data:/data
