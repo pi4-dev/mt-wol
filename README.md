@@ -3,7 +3,7 @@
 Inventory of hosts in the LANs visible from a MikroTik router, with remote Wake-on-LAN
 through the RouterOS API (`/tool/wol`).
 
-**The app has no authentication of its own** and `docker-compose.yml` publishes its port directly.
+**The app has no authentication of its own** and `docker-compose.yaml` publishes its port directly.
 Anyone who can reach the port can wake hosts and read the inventory, so run it only on a trusted
 network or put your own reverse proxy / auth in front of it.
 
